@@ -1,0 +1,25 @@
+#include <WiFi.h>
+
+void setup() {
+  // Initialize serial communication
+  Serial.begin(115200);
+
+  // Give the serial monitor time to connect
+  delay(1000);
+
+  // Set Wi-Fi to station mode
+  // This is required to access the Wi-Fi MAC address
+  WiFi.mode(WIFI_STA);
+
+  Serial.println();
+  Serial.println("=== ESP32 MAC ADDRESS ===");
+}
+
+void loop() {
+  // Print the Wi-Fi MAC address
+  Serial.print("MAC address: ");
+  Serial.println(WiFi.macAddress());
+
+  // Wait 5 seconds before printing again
+  delay(5000);
+}
