@@ -1,0 +1,101 @@
+#include <WiFi.h>
+#include <esp_now.h>
+
+// ===== Pin mapping (your setup) =====
+constexpr int BUTTON_PIN = 25;
+constexpr int LED_PIN    = 26;
+
+// ===== CHANGE THIS on each board =====
+// Board A: set this to MAC of Board B
+// Board B: set this to MAC of Board A
+uint8_t peerMac[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }; // <-- REPLACE
+
+// Simple packet: only button state
+struct __attribute__((packed)) Packet {
+  uint8_t pressed; // 1 = pressed, 0 = released
+};
+
+volatile uint8_t remotePressed = 0;
+
+// Receive callback (runs when an ESP-NOW packet arrives)
+void onReceive(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  // Keep the callback lightweight
+  if (len != (int)sizeof(Packet)) return;
+
+  Packet p;
+  memcpy(&p, data, sizeof(p));
+  remotePressed = p.pressed;
+}
+
+// Send callback (signature changed in newer ESP32 Arduino cores / IDF 5.x)
+void onSend(const wifi_tx_info_t *info, esp_now_send_status_t status) {
+  // Optional debug:
+  // Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Send OK" : "Send FAIL");
+
+  // If you want the destination MAC:
+  // const uint8_t *mac = info->des_addr;
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(300);
+
+  // Button uses internal pull-up: pressed = LOW
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  // LED output
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+
+  // Required for ESP-NOW
+  WiFi.mode(WIFI_STA);
+
+  // Init ESP-NOW
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("ESP-NOW init failed");
+    while (true) delay(100);
+  }
+
+  esp_now_register_recv_cb(onReceive);
+  esp_now_register_send_cb(onSend);
+
+  // Register the other board as a peer
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, peerMac, 6);
+  peerInfo.channel = 0;    // Use current Wi-Fi channel
+  peerInfo.encrypt = false;
+
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("Failed to add peer");
+    while (true) delay(100);
+  }
+
+  Serial.print("My MAC: ");
+  Serial.println(WiFi.macAddress());
+  Serial.println("Ready. Press the button to control the other board's LED.");
+}
+
+void loop() {
+  // ===== 1) Send my button state when it changes =====
+  static uint8_t lastLocalPressed = 2;
+
+  uint8_t localPressed = (digitalRead(BUTTON_PIN) == LOW) ? 1 : 0;
+
+  if (localPressed != lastLocalPressed) {
+    lastLocalPressed = localPressed;
+
+    Packet p;
+    p.pressed = localPressed;
+
+    esp_err_t res = esp_now_send(peerMac, (uint8_t*)&p, sizeof(p));
+    if (res != ESP_OK) {
+      // Optional debug:
+      // Serial.println("esp_now_send failed");
+    }
+  }
+
+  // ===== 2) Drive my LED from the OTHER board's button =====
+  digitalWrite(LED_PIN, remotePressed ? HIGH : LOW);
+
+  delay(10); // small debounce + CPU relief
+}
